@@ -168,6 +168,7 @@ public:
 	void countKmers(size_t hardThreshold, int genomeSize);
 	void setRepeatCutoff(int minCoverage);
 	void buildIndex(int minCoverage);
+	void buildIndex(int minCoverage, std::string& kmersList);
 	void buildIndexUnevenCoverage(int minCoverage, float selectRate, 
 								  int tandemFreq);
 	void clear();

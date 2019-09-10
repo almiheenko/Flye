@@ -287,9 +287,11 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
 	//const int MAX_LOOK_BACK = 50;
 	const int kmerSize = Parameters::get().kmerSize;
 	//const float minKmerSruvivalRate = std::exp(-_maxDivergence * kmerSize);
-	const float minKmerSruvivalRate = 0.01;
+	const float minKmerSruvivalRate = 0.001;
 	const float LG_GAP = 2;
-	const float SM_GAP = 0.5;
+	const float SM_DIFF = 500;
+	const float SM_GAP = 0;
+	const float KMER_BONUS = 1;
 
 	outSuggestChimeric = false;
 	int32_t curLen = fastaRec.sequence.length();
@@ -475,15 +477,15 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
 										  (extNext - extPrev));
 					//int32_t gapCost = jumpDiv ? 
 					//		kmerSize * jumpDiv + ilog2_32(jumpDiv) : 0;
-					int32_t gapCost = (jumpDiv > 100 ? LG_GAP : SM_GAP) * jumpDiv;
-					int32_t nextScore = scoreTable[j] + matchScore - gapCost;
+					int32_t gapCost = (jumpDiv > SM_DIFF ? LG_GAP : SM_GAP) * jumpDiv;
+					int32_t nextScore = scoreTable[j] + matchScore - gapCost + KMER_BONUS;
 					if (nextScore > maxScore)
 					{
 						maxScore = nextScore;
 						maxId = j;
 						//noImprovement = 0;
 
-						if (jumpDiv == 0 && curNext - curPrev < kmerSize) break;
+						//if (jumpDiv == 0 && curNext - curPrev < kmerSize) break;
 					}
 					/*else
 					{
@@ -559,8 +561,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
 				if (_keepAlignment)
 				{
 					if (kmerMatches.empty() || 
-						kmerMatches.back().first - matchesList[pos].curPos >
-						kmerSize)
+						kmerMatches.back().first - matchesList[pos].curPos > 0)
 					{
 						kmerMatches.emplace_back(matchesList[pos].curPos,
 								 				 matchesList[pos].extPos);
@@ -946,7 +947,7 @@ void OverlapContainer::filterOverlaps()
 }
 
 
-void OverlapContainer::estimateOverlaperParameters()
+void OverlapContainer::estimateOverlaperParameters(std::string& outChains)
 {
 	Logger::get().debug() << "Estimating k-mer identity bias";
 
@@ -954,11 +955,26 @@ void OverlapContainer::estimateOverlaperParameters()
 	const int MAX_SEQS = 1000;
 
 	std::vector<FastaRecord::Id> readsToCheck;
-	for (size_t i = 0; i < MAX_SEQS; ++i) 
-	{
-		size_t randId = rand() % _queryContainer.iterSeqs().size();
-		readsToCheck.push_back(_queryContainer.iterSeqs()[randId].id);
-	}
+    std::ofstream fout(outChains);
+    for (size_t i = 0; i < _queryContainer.iterSeqs().size(); ++i)
+    {
+        readsToCheck.push_back(_queryContainer.iterSeqs()[i].id);
+        auto seq_overlaps = this->quickSeqOverlaps(_queryContainer.iterSeqs()[i].id, /*max ovlps*/ 0);
+        for (auto& ovlp : seq_overlaps)
+        {
+            fout << "\tAln\t";
+            ovlp.dump(fout, _queryContainer, _ovlpDetect._seqContainer);
+            fout << "\n";
+            for (auto& posPair : ovlp.kmerMatches)
+            {
+                fout << posPair.first << "\t" << posPair.second << "\n";
+            }
+            fout << "\n";
+       }
+    }
+    fout.close();
+	Logger::get().info() << "Chains saved to " << outChains;
+    exit(0);
 
 	std::mutex storageMutex;
 	std::vector<float> biases;

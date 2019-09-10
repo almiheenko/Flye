@@ -325,7 +325,7 @@ public:
 
 	size_t indexSize() {return _indexSize;}
 
-	void estimateOverlaperParameters();
+	void estimateOverlaperParameters(std::string& outChains);
 
 	void setRelativeDivergenceThreshold(float relThreshold);
 

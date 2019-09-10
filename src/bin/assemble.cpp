@@ -22,8 +22,9 @@
 
 #include <getopt.h>
 
-bool parseArgs(int argc, char** argv, std::string& readsFasta, 
-			   std::string& outAssembly, std::string& logFile, size_t& genomeSize,
+bool parseArgs(int argc, char** argv, std::string& readsFasta,
+               std::string& inAssembly, std::string& outChains, std::string& kmersList,
+               std::string& outAssembly, std::string& logFile, size_t& genomeSize,
 			   int& kmerSize, bool& debug, size_t& numThreads, int& minOverlap, 
 			   std::string& configPath, int& minReadLength, bool& unevenCov)
 {
@@ -56,6 +57,9 @@ bool parseArgs(int argc, char** argv, std::string& readsFasta,
 	static option longOptions[] =
 	{
 		{"reads", required_argument, 0, 0},
+		{"asm", required_argument, 0, 0},
+		{"kmers", required_argument, 0, 0},
+		{"chains", required_argument, 0, 0},
 		{"out-asm", required_argument, 0, 0},
 		{"genome-size", required_argument, 0, 0},
 		{"config", required_argument, 0, 0},
@@ -91,6 +95,12 @@ bool parseArgs(int argc, char** argv, std::string& readsFasta,
 				unevenCov = true;
 			else if (!strcmp(longOptions[optionIndex].name, "reads"))
 				readsFasta = optarg;
+			else if (!strcmp(longOptions[optionIndex].name, "asm"))
+				inAssembly = optarg;
+			else if (!strcmp(longOptions[optionIndex].name, "chains"))
+				outChains = optarg;
+			else if (!strcmp(longOptions[optionIndex].name, "kmers"))
+				kmersList = optarg;
 			else if (!strcmp(longOptions[optionIndex].name, "out-asm"))
 				outAssembly = optarg;
 			else if (!strcmp(longOptions[optionIndex].name, "genome-size"))
@@ -129,11 +139,14 @@ int main(int argc, char** argv)
 	bool unevenCov = false;
 	size_t numThreads = 1;
 	std::string readsFasta;
+	std::string inAssembly;
+	std::string outChains;
+	std::string kmersList;
 	std::string outAssembly;
 	std::string logFile;
 	std::string configPath;
 
-	if (!parseArgs(argc, argv, readsFasta, outAssembly, logFile, genomeSize,
+	if (!parseArgs(argc, argv, readsFasta, inAssembly, outChains, kmersList, outAssembly, logFile, genomeSize,
 				   kmerSize, debugging, numThreads, minOverlap, configPath, 
 				   minReadLength, unevenCov)) return 1;
 
@@ -159,6 +172,18 @@ int main(int argc, char** argv)
 	Logger::get().debug() << "Metagenome mode: " << "NY"[unevenCov];
 
 	SequenceContainer readsContainer;
+	SequenceContainer assemblyContainer;
+	try
+	{
+	    assemblyContainer.loadFromFile(inAssembly, minReadLength);
+	}
+	catch (SequenceContainer::ParseException& e)
+	{
+		Logger::get().error() << e.what();
+		return 1;
+	}
+	assemblyContainer.buildPositionIndex();
+
 	std::vector<std::string> readsList = splitString(readsFasta, ',');
 	Logger::get().info() << "Reading sequences";
 	try
@@ -174,7 +199,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	readsContainer.buildPositionIndex();
-	VertexIndex vertexIndex(readsContainer, 
+	VertexIndex vertexIndex(assemblyContainer,
 							(int)Config::get("assemble_kmer_sample"));
 	vertexIndex.outputProgress(true);
 
@@ -191,19 +216,19 @@ int main(int argc, char** argv)
 	{
 		size_t hardThreshold = std::min(5, std::max(2, 
 				coverage / (int)Config::get("hard_min_coverage_rate")));
-		vertexIndex.countKmers(hardThreshold, genomeSize);
+		vertexIndex.countKmers(1, genomeSize);
 	}
 	else
 	{
-		vertexIndex.countKmers(/*hard threshold*/ 2, genomeSize);
+		vertexIndex.countKmers(/*hard threshold*/ 1, genomeSize);
 	}
-	ParametersEstimator estimator(readsContainer, vertexIndex, genomeSize);
-	estimator.estimateMinKmerCount();
-	int minKmerCov = estimator.minKmerCount();
-	vertexIndex.setRepeatCutoff(minKmerCov);
+	//ParametersEstimator estimator(readsContainer, vertexIndex, genomeSize);
+	//estimator.estimateMinKmerCount();
+	//int minKmerCov = estimator.minKmerCount();
+	vertexIndex.setRepeatCutoff(1);
 	if (!Parameters::get().unevenCoverage)
 	{
-		vertexIndex.buildIndex(minKmerCov);
+		vertexIndex.buildIndex(1, kmersList);
 	}
 	else
 	{
@@ -217,18 +242,18 @@ int main(int argc, char** argv)
 		<< getPeakRSS() / 1024 / 1024 / 1024 << " Gb";
 
 	//int maxOverlapsNum = !Parameters::get().unevenCoverage ? 5 * coverage : 0;
-	OverlapDetector ovlp(readsContainer, vertexIndex,
+	OverlapDetector ovlp(assemblyContainer, vertexIndex,
 						 (int)Config::get("maximum_jump"), 
 						 Parameters::get().minimumOverlap,
 						 (int)Config::get("maximum_overhang"),
 						 /*no max overlaps*/ 0, 
-						 /*store alignment*/ false,
+						 /*store alignment*/ true,
 						 /*only max*/ true,
 						 /*no div threshold*/ 1.0f,
 						 /* bad end adjustment*/ 0.0f,
 						 /* nucl alignent*/ false);
 	OverlapContainer readOverlaps(ovlp, readsContainer);
-	readOverlaps.estimateOverlaperParameters();
+	readOverlaps.estimateOverlaperParameters(outChains);
 	readOverlaps.setRelativeDivergenceThreshold(
 		(float)Config::get("assemble_ovlp_relative_divergence"));
 
